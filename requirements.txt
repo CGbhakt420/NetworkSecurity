@@ -5,3 +5,6 @@ scikit-learn
 seaborn
 python-dotenv
 pymongo
+certifi
+
+# -e .
