@@ -6,5 +6,7 @@ seaborn
 python-dotenv
 pymongo[srv]
 certifi
+dill
+pyaml
 
 # -e .
