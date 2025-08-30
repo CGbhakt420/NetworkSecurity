@@ -8,7 +8,10 @@ pymongo[srv]
 certifi
 dill
 pyaml
-mlflow
+mlflow==2.11.3
 dagshub
+fastapi
+uvicorn
+python-multipart
 
 # -e .
