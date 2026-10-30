@@ -5,19 +5,20 @@ from networkSecurity.entity.artifact_entity import DataIngestionArtifact
 import os
 import sys 
 import pymongo 
+import certifi
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from typing import List
 from dotenv import load_dotenv
+
 load_dotenv()
 MONGO_URL = os.getenv("MONGO_URL")
 
 class DataIngestion:
-    def __init__(self, data_ingestion_config:DataIngestionConfig):
+    def __init__(self, data_ingestion_config: DataIngestionConfig):
         try:
             self.data_ingestion_config = data_ingestion_config
-            
         except Exception as e:
             raise NetworkSecurityException(e, sys)
         
@@ -25,14 +26,34 @@ class DataIngestion:
         try:
             database = self.data_ingestion_config.database_name
             collection_name = self.data_ingestion_config.collection_name
-            self.mongo_client = pymongo.MongoClient(MONGO_URL)
-            collection = self.mongo_client[database][collection_name]
-            df = pd.DataFrame(list(collection.find()))
-            if "_id" in df.columns.to_list():
-                df.drop(columns=["_id"], axis=1, inplace=True)
-            df.replace({"na":np.nan}, inplace=True)
-            return df
-            
+
+            # Attempt MongoDB Atlas connection if URL is configured
+            if MONGO_URL:
+                try:
+                    ca = certifi.where()
+                    self.mongo_client = pymongo.MongoClient(MONGO_URL, tlsCAFile=ca, serverSelectionTimeoutMS=3000)
+                    collection = self.mongo_client[database][collection_name]
+                    df = pd.DataFrame(list(collection.find()))
+                    if not df.empty:
+                        if "_id" in df.columns.to_list():
+                            df.drop(columns=["_id"], axis=1, inplace=True)
+                        df.replace({"na": np.nan}, inplace=True)
+                        logging.info(f"Successfully loaded {len(df)} records from MongoDB collection: {collection_name}")
+                        return df
+                except Exception as mongo_err:
+                    logging.warning(f"MongoDB connection failed ({mongo_err}). Falling back to local dataset file.")
+
+            # Resilient fallback to local dataset file
+            local_file_path = os.path.join("Network_Data", "phishingData.csv")
+            if os.path.exists(local_file_path):
+                logging.info(f"Loading dataset from local backup: {local_file_path}")
+                df = pd.read_csv(local_file_path)
+                if "_id" in df.columns.to_list():
+                    df.drop(columns=["_id"], axis=1, inplace=True)
+                df.replace({"na": np.nan}, inplace=True)
+                return df
+            else:
+                raise Exception(f"Could not connect to MongoDB and local file not found at: {local_file_path}")
             
         except Exception as e:
             raise NetworkSecurityException(e, sys)
@@ -49,14 +70,17 @@ class DataIngestion:
         
     def split_data_as_train_test(self, dataframe: pd.DataFrame):
         try:
-            train_df, test_df = train_test_split(dataframe, test_size=self.data_ingestion_config.train_test_split_ratio, random_state=42)
+            train_df, test_df = train_test_split(
+                dataframe, 
+                test_size=self.data_ingestion_config.train_test_split_ratio, 
+                random_state=42
+            )
             logging.info("Performed train test split")
             dir_path = os.path.dirname(self.data_ingestion_config.training_file_path)
             os.makedirs(dir_path, exist_ok=True)
             logging.info("Exporting train and test file path")
             train_df.to_csv(
                 self.data_ingestion_config.training_file_path, index=False, header=True
-                
             )
             test_df.to_csv(
                 self.data_ingestion_config.testing_file_path, index=False, header=True
@@ -68,15 +92,13 @@ class DataIngestion:
 
     def initiate_data_ingestion(self):
         try:
-            dataframe=self.export_collection_as_dataframe()
-            dataframe=self.export_data_into_feature_store(dataframe)
+            dataframe = self.export_collection_as_dataframe()
+            dataframe = self.export_data_into_feature_store(dataframe)
             self.split_data_as_train_test(dataframe)
-            dataingestionArtifact = DataIngestionArtifact(training_file_path=self.data_ingestion_config.training_file_path, testing_file_path=self.data_ingestion_config.testing_file_path)
+            dataingestionArtifact = DataIngestionArtifact(
+                training_file_path=self.data_ingestion_config.training_file_path, 
+                testing_file_path=self.data_ingestion_config.testing_file_path
+            )
             return dataingestionArtifact
-            
-            
-            
-            
         except Exception as e:
             raise NetworkSecurityException(e, sys)
-        

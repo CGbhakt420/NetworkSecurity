@@ -20,9 +20,6 @@ from fastapi.responses import Response, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-ca = certifi.where()
-mongo_db_url = os.getenv("MONGO_URL")
-
 app = FastAPI(title="Network Security - Phishing Detection API")
 origins = ["*"]
 
@@ -128,7 +125,22 @@ async def predict_route(request: Request, file: UploadFile = File(...)):
 async def train_route():
     try:
         train_pipeline = TrainingPipeline()
-        train_pipeline.run_pipeline()
-        return Response("Training is successful")
+        model_trainer_artifact = train_pipeline.run_pipeline()
+        return JSONResponse(content={
+            "status": "success",
+            "message": "Model training completed successfully!",
+            "train_metrics": {
+                "f1_score": round(float(model_trainer_artifact.train_metric_artifact.f1_score), 4),
+                "precision": round(float(model_trainer_artifact.train_metric_artifact.precision_score), 4),
+                "recall": round(float(model_trainer_artifact.train_metric_artifact.recall_score), 4)
+            },
+            "test_metrics": {
+                "f1_score": round(float(model_trainer_artifact.test_metric_artifact.f1_score), 4),
+                "precision": round(float(model_trainer_artifact.test_metric_artifact.precision_score), 4),
+                "recall": round(float(model_trainer_artifact.test_metric_artifact.recall_score), 4)
+            }
+        })
     except Exception as e:
-        raise NetworkSecurityException(e, sys)
+        error_msg = str(e)
+        logging.error(f"Training failed: {error_msg}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": error_msg})
