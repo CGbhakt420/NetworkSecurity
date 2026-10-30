@@ -155,6 +155,7 @@ def run_training_job():
             training_status["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             training_status["message"] = "Model training completed successfully! New models and preprocessors are active."
             training_status["metrics"] = {
+                "best_model": getattr(model_trainer_artifact, "best_model_name", "Best Model"),
                 "train_metrics": {
                     "f1_score": round(float(model_trainer_artifact.train_metric_artifact.f1_score), 4),
                     "precision": round(float(model_trainer_artifact.train_metric_artifact.precision_score), 4),

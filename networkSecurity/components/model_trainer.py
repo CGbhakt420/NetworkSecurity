@@ -47,27 +47,44 @@ class ModelTrainer:
     def train_model(self, x_train, y_train, x_test, y_test):
         try:
             models = {
-                "Logistic Regression": LogisticRegression(),
                 "Decision Tree": DecisionTreeClassifier(),
                 "Random Forest": RandomForestClassifier(),
                 "Gradient Boosting": GradientBoostingClassifier(),
-                "AdaBoost": AdaBoostClassifier()    
+                "AdaBoost": AdaBoostClassifier(),
+                "Logistic Regression": LogisticRegression()
             }
             params = {
                 "Decision Tree": {
-                    'criterion': ['gini', 'entropy']
+                    'criterion': ['gini', 'entropy', 'log_loss'],
+                    'max_depth': [None, 10, 20, 30],
+                    'min_samples_split': [2, 5, 10],
+                    'min_samples_leaf': [1, 2, 4],
+                    'max_features': [None, 'sqrt', 'log2']
                 },
                 "Random Forest": {
-                    'n_estimators': [32, 64]
+                    'n_estimators': [32, 64, 100],
+                    'criterion': ['gini', 'entropy'],
+                    'max_depth': [None, 15, 25],
+                    'min_samples_split': [2, 5],
+                    'min_samples_leaf': [1, 2],
+                    'max_features': ['sqrt', 'log2']
                 },
                 "Gradient Boosting": {
-                    'learning_rate': [0.1],
-                    'n_estimators': [32, 64]
+                    'learning_rate': [0.01, 0.05, 0.1, 0.2],
+                    'n_estimators': [32, 64, 100],
+                    'subsample': [0.7, 0.85, 1.0],
+                    'max_depth': [3, 5, 7],
+                    'min_samples_split': [2, 5]
                 },
-                "Logistic Regression": {},
                 "AdaBoost": {
-                    'learning_rate': [0.1],
-                    'n_estimators': [32, 64]
+                    'learning_rate': [0.01, 0.05, 0.1, 0.2, 0.5, 1.0],
+                    'n_estimators': [32, 64, 100]
+                },
+                "Logistic Regression": {
+                    'C': [0.01, 0.1, 1.0, 10.0, 100.0],
+                    'penalty': ['l1', 'l2'],
+                    'solver': ['liblinear'],
+                    'max_iter': [300]
                 }
             }
             
@@ -79,6 +96,8 @@ class ModelTrainer:
             ]
             
             best_model = models[best_model_name]
+            logging.info(f"Selected Best Model: {best_model_name} with Weighted F1 Score: {best_model_score:.4f}")
+            logging.info(f"Best Model Hyperparameters: {best_model.get_params()}")
             
             y_train_pred = best_model.predict(x_train)
             classification_train_metric = get_classification_metrics(y_true=y_train, y_pred=y_train_pred)
@@ -104,7 +123,8 @@ class ModelTrainer:
             model_trainer_artifact = ModelTrainerArtifact(
                 trained_model_file_path=self.model_trainer_config.trained_model_file_path,
                 train_metric_artifact=classification_train_metric,
-                test_metric_artifact=classification_test_metric
+                test_metric_artifact=classification_test_metric,
+                best_model_name=best_model_name
             )
             logging.info(f"Model Trainer Artifact: {model_trainer_artifact}")
             return model_trainer_artifact

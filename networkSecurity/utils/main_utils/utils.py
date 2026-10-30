@@ -5,8 +5,8 @@ import numpy as np
 import os, sys
 import dill
 import pickle 
-from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import r2_score
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, ParameterGrid
+from sklearn.metrics import r2_score, f1_score
 
 def read_yaml(file_path: str) -> dict:
     try:
@@ -56,7 +56,6 @@ def load_object(file_path: str)->object:
         if not os.path.exists(file_path):
             raise Exception(f"The file: {file_path} does not exist")
         with open(file_path, "rb") as file_obj:
-            print(file_obj)
             return pickle.load(file_obj)
     except Exception as e:
         raise NetworkSecurityException(e, sys) from e
@@ -73,26 +72,44 @@ def load_numpy_array_data(file_path: str) -> np.array:
     except Exception as e:
         raise NetworkSecurityException(e, sys) from e
     
-def evaluate_models(x_train, y_train, x_test, y_test, models, params):
+def evaluate_models(x_train, y_train, x_test, y_test, models, params, n_iter=6):
     try:
         report = {}
         for i in range(len(list(models))):
+            model_name = list(models.keys())[i]
             model = list(models.values())[i]
-            param = params[list(models.keys())[i]]
+            param = params.get(model_name, {})
             
-            gs = GridSearchCV(model, param, cv=3)
-            gs.fit(x_train, y_train)
+            total_combinations = len(ParameterGrid(param)) if param else 0
             
-            model.set_params(**gs.best_params_)
-            model.fit(x_train, y_train)
+            # If search space is small, do exhaustive GridSearchCV.
+            # If search space is large/rich, do RandomizedSearchCV with n_iter to maintain high speed.
+            if total_combinations <= n_iter or total_combinations <= 1:
+                search = GridSearchCV(model, param, cv=3, scoring="f1_weighted", n_jobs=1)
+            else:
+                search = RandomizedSearchCV(
+                    model, 
+                    param_distributions=param, 
+                    n_iter=n_iter, 
+                    cv=3, 
+                    scoring="f1_weighted", 
+                    random_state=42, 
+                    n_jobs=1
+                )
             
-            y_train_pred = model.predict(x_train)
-            y_test_pred = model.predict(x_test)
+            search.fit(x_train, y_train)
             
-            train_model_score = r2_score(y_train, y_train_pred)
-            test_model_score = r2_score(y_test, y_test_pred)
+            best_model = search.best_estimator_
+            models[model_name] = best_model
             
-            report[list(models.keys())[i]] = test_model_score
+            y_train_pred = best_model.predict(x_train)
+            y_test_pred = best_model.predict(x_test)
+            
+            test_model_score = f1_score(y_test, y_test_pred, average="weighted")
+            report[model_name] = test_model_score
+            
+            logging.info(f"Model: {model_name} | Best Params: {search.best_params_} | Weighted F1: {test_model_score:.4f}")
+            
         return report
     except Exception as e:
         raise NetworkSecurityException(e, sys)
