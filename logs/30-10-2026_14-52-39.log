@@ -1,0 +1,13 @@
+2026-10-30 14:52:50,347 625 - DEBUG - Using proactor: IocpProactor
+2026-10-30 14:52:50,378 1025 - INFO - HTTP Request: GET http://testserver/ "HTTP/1.1 200 OK"
+2026-10-30 14:52:50,381 625 - DEBUG - Using proactor: IocpProactor
+2026-10-30 14:52:50,385 628 - DEBUG - Calling on_field_start with no data
+2026-10-30 14:52:50,386 625 - DEBUG - Calling on_field_name with data[0:3]
+2026-10-30 14:52:50,386 625 - DEBUG - Calling on_field_data with data[4:32]
+2026-10-30 14:52:50,386 628 - DEBUG - Calling on_field_end with no data
+2026-10-30 14:52:50,386 628 - DEBUG - Calling on_end with no data
+2026-10-30 14:52:50,503 1051 - DEBUG - Starting new HTTPS connection (1): www.google.com:443
+2026-10-30 14:52:50,793 1025 - INFO - HTTP Request: POST http://testserver/detect "HTTP/1.1 200 OK"
+2026-10-30 14:52:50,795 625 - DEBUG - Using proactor: IocpProactor
+2026-10-30 14:52:50,803 243 - DEBUG - Starting new HTTP connection (1): 192.168.1.1:80
+2026-10-30 14:52:51,036 1025 - INFO - HTTP Request: POST http://testserver/predict-url "HTTP/1.1 200 OK"

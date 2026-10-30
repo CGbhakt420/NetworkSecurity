@@ -1,0 +1,2 @@
+2026-10-30 14:47:01,764 1051 - DEBUG - Starting new HTTPS connection (1): www.google.com:443
+2026-10-30 14:47:01,846 243 - DEBUG - Starting new HTTP connection (1): 192.168.1.1:80

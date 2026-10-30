@@ -1,0 +1,4 @@
+2026-10-30 14:50:51,133 1051 - DEBUG - Starting new HTTPS connection (1): www.google.com:443
+2026-10-30 14:50:51,401 1051 - DEBUG - Starting new HTTPS connection (1): www.paypal.com:443
+2026-10-30 14:50:51,550 243 - DEBUG - Starting new HTTP connection (1): 192.168.1.1:80
+2026-10-30 14:50:51,692 243 - DEBUG - Starting new HTTP connection (1): appleid.apple.com.verify-user-account.tk:80

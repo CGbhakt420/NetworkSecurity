@@ -1,0 +1,3 @@
+2026-10-30 14:49:11,998 1051 - DEBUG - Starting new HTTPS connection (1): www.google.com:443
+2026-10-30 14:49:12,118 243 - DEBUG - Starting new HTTP connection (1): 192.168.1.1:80
+2026-10-30 14:49:12,232 243 - DEBUG - Starting new HTTP connection (1): bank-account-security-update.xyz.vu:80

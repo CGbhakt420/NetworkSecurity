@@ -1,85 +1,134 @@
 import sys
 import os
 import certifi
-
-from networkSecurity.utils.ml_utils.model.estimator import NetworkModel
-ca = certifi.where()
-
+import pandas as pd
 from dotenv import load_dotenv
 load_dotenv()
-mongo_db_url = os.getenv("MONGO_URL")
-print(mongo_db_url)
 
-import pymongo
-
+from networkSecurity.utils.ml_utils.model.estimator import NetworkModel
+from networkSecurity.utils.feature_extraction import URLFeatureExtractor
 from networkSecurity.exceptionHandling.exception import NetworkSecurityException
 from networkSecurity.logging.logger import logging
 from networkSecurity.pipeline.training_pipeline import TrainingPipeline
 from networkSecurity.utils.main_utils.utils import load_object
+from networkSecurity.constant.training_pipeline import DATA_INGESTION_DATABASE_NAME, DATA_INGESTION_COLLECTION_NAME
 
-
+import pymongo
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, File, UploadFile, Request
-from uvicorn import run as app_run
-from fastapi.responses import Response
-from starlette.responses import RedirectResponse
-import pandas as pd
+from fastapi import FastAPI, File, UploadFile, Request, Form
+from fastapi.responses import Response, JSONResponse
+from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 
-from networkSecurity.constant.training_pipeline import DATA_INGESTION_DATABASE_NAME
-from networkSecurity.constant.training_pipeline import DATA_INGESTION_COLLECTION_NAME
+ca = certifi.where()
+mongo_db_url = os.getenv("MONGO_URL")
 
-client = pymongo.MongoClient(mongo_db_url, tlsCAFile=ca)
-
-database = client[DATA_INGESTION_DATABASE_NAME]
-collection = database[DATA_INGESTION_COLLECTION_NAME]
-
-app = FastAPI()
-origins=["*"]
+app = FastAPI(title="Network Security - Phishing Detection API")
+origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins = origins,
-    allow_credentials = True,
-    allow_methods = ["*"],
-    allow_headers = ["*"],
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-from fastapi.templating import Jinja2Templates
 templates = Jinja2Templates(directory="./templates")
 
-@app.get("/", tags=["authentication"])
-async def index():
-    return RedirectResponse(url="/docs")
+def predict_from_features(features_df: pd.DataFrame):
+    preprocessor = load_object("final_models/preprocessor.pkl")
+    final_model = load_object("final_models/model.pkl")
+    network_model = NetworkModel(preprocessor=preprocessor, model=final_model)
+
+    pred = network_model.predict(features_df)[0]
+    # pred: 0.0 -> Phishing, 1.0 -> Legitimate
+    is_phishing = bool(pred == 0.0)
+
+    phishing_prob = None
+    legit_prob = None
+    confidence_label = "Classified"
+    if hasattr(final_model, "predict_proba"):
+        transformed = preprocessor.transform(features_df)
+        probs = final_model.predict_proba(transformed)[0]
+        phishing_prob = round(float(probs[0]) * 100, 2)
+        legit_prob = round(float(probs[1]) * 100, 2)
+        confidence_label = f"{phishing_prob}% Phishing Risk" if is_phishing else f"{legit_prob}% Legitimate Confidence"
+
+    return is_phishing, phishing_prob, legit_prob, confidence_label
+
+class URLRequest(BaseModel):
+    url: str
+
+@app.get("/")
+async def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request, "result": None, "url": ""})
+
+@app.post("/detect")
+async def detect_website(request: Request, url: str = Form(...)):
+    try:
+        extractor = URLFeatureExtractor(timeout=1.5)
+        features_df = extractor.extract_features(url)
+        is_phishing, phishing_prob, legit_prob, confidence_label = predict_from_features(features_df)
+        explanations = URLFeatureExtractor.get_feature_explanations(features_df)
+
+        result = {
+            "url": url,
+            "is_phishing": is_phishing,
+            "phishing_prob": phishing_prob if phishing_prob is not None else (100.0 if is_phishing else 0.0),
+            "legit_prob": legit_prob if legit_prob is not None else (0.0 if is_phishing else 100.0),
+            "confidence_label": confidence_label,
+            "explanations": explanations
+        }
+        return templates.TemplateResponse("index.html", {"request": request, "result": result, "url": url})
+    except Exception as e:
+        raise NetworkSecurityException(e, sys)
+
+@app.post("/predict-url")
+async def predict_url_api(payload: URLRequest):
+    try:
+        extractor = URLFeatureExtractor(timeout=1.5)
+        features_df = extractor.extract_features(payload.url)
+        is_phishing, phishing_prob, legit_prob, confidence_label = predict_from_features(features_df)
+        explanations = URLFeatureExtractor.get_feature_explanations(features_df)
+
+        return JSONResponse(content={
+            "url": payload.url,
+            "status": "Malicious / Phishing" if is_phishing else "Legitimate / Safe",
+            "is_phishing": is_phishing,
+            "probabilities": {
+                "phishing": f"{phishing_prob}%" if phishing_prob is not None else "N/A",
+                "legitimate": f"{legit_prob}%" if legit_prob is not None else "N/A"
+            },
+            "confidence_label": confidence_label,
+            "features": {k: (None if pd.isna(v) else int(v)) for k, v in features_df.iloc[0].to_dict().items()},
+            "explanations": explanations
+        })
+    except Exception as e:
+        raise NetworkSecurityException(e, sys)
 
 @app.post("/predict")
-async def predict_route(request: Request, file: UploadFile=File(...)):
+async def predict_route(request: Request, file: UploadFile = File(...)):
     try:
         df = pd.read_csv(file.file)
         preprocessor = load_object("final_models/preprocessor.pkl")
-        final_model=load_object("final_models/model.pkl")
-        network_model=NetworkModel(preprocessor=preprocessor, model=final_model)
-        print(df.iloc[0])
-        
+        final_model = load_object("final_models/model.pkl")
+        network_model = NetworkModel(preprocessor=preprocessor, model=final_model)
+
         y_pred = network_model.predict(df)
-        print(y_pred)
         df['Predicted_column'] = y_pred
-        print(df['Predicted_column'])
+        os.makedirs("prediction_output", exist_ok=True)
         df.to_csv("prediction_output/output.csv")
         table_html = df.to_html(classes="table table-striped")
         return templates.TemplateResponse("table.html", {"request": request, "table": table_html})
     except Exception as e:
         raise NetworkSecurityException(e, sys)
-        
 
 @app.get("/train")
 async def train_route():
     try:
         train_pipeline = TrainingPipeline()
         train_pipeline.run_pipeline()
-        return Response("Training is succesfull")
+        return Response("Training is successful")
     except Exception as e:
-        raise NetworkSecurityException(e,sys)
-    
-
-    
-
+        raise NetworkSecurityException(e, sys)
