@@ -204,7 +204,7 @@ class URLFeatureExtractor:
             # 10. Favicon
             if content_parser.favicon_url:
                 fav = content_parser.favicon_url.lower()
-                features["Favicon"] = 1 if netloc in fav or fav.startswith("/") else -1
+                features["Favicon"] = 1 if self._is_same_domain_or_org(fav, netloc) else -1
             else:
                 features["Favicon"] = 1
 
@@ -217,7 +217,7 @@ class URLFeatureExtractor:
                 suspicious_anchors = sum(
                     1 for a in anchors 
                     if a in ["#", "", "javascript:void(0);", "javascript:void(0)"] 
-                    or (a.startswith("http") and netloc not in a.lower())
+                    or not self._is_same_domain_or_org(a, netloc)
                 )
                 ratio = suspicious_anchors / len(anchors)
                 features["URL_of_Anchor"] = 1 if ratio < 0.31 else (0 if ratio <= 0.67 else -1)
@@ -320,11 +320,26 @@ class URLFeatureExtractor:
             # If offline/sandbox/timeout but URL explicitly specifies https, default to 1
             return 1
 
+    def _is_same_domain_or_org(self, url_item: str, domain: str) -> bool:
+        if not url_item:
+            return True
+        item_lower = url_item.lower().strip()
+        domain_lower = domain.lower().strip()
+        if not item_lower.startswith(("http://", "https://", "//")):
+            return True
+        if domain_lower in item_lower:
+            return True
+        parts = domain_lower.split(".")
+        if len(parts) >= 2:
+            main_org = parts[-2]
+            if len(main_org) >= 4 and main_org in item_lower:
+                return True
+        return False
+
     def _calc_ratio(self, items, domain: str, safe_thresh: float, med_thresh: float) -> int:
         if not items:
             return 1
-        domain = domain.lower()
-        external = sum(1 for it in items if it.lower().startswith("http") and domain not in it.lower())
+        external = sum(1 for it in items if not self._is_same_domain_or_org(it, domain))
         ratio = external / len(items)
         return 1 if ratio < safe_thresh else (0 if ratio <= med_thresh else -1)
 

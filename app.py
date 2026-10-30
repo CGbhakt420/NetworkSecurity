@@ -64,9 +64,8 @@ def invalidate_model_cache():
 def predict_from_features(features_df: pd.DataFrame, threshold: float = 0.40):
     preprocessor, final_model, network_model = get_loaded_models()
 
-    # 1. Feature Inspection & Danger Signals
+    # 1. Feature Inspection
     features_dict = features_df.iloc[0].to_dict()
-    danger_flags = sum(1 for v in features_dict.values() if v == -1)
 
     has_ip_host = features_dict.get("having_IP_Address") == -1
     has_at_symbol = features_dict.get("having_At_Symbol") == -1
@@ -74,13 +73,14 @@ def predict_from_features(features_df: pd.DataFrame, threshold: float = 0.40):
     has_abnormal_url = features_dict.get("Abnormal_URL") == -1
     has_bad_ssl = features_dict.get("SSLfinal_State") == -1
 
-    # Critical threat signatures (signatures legitimate banking/ecommerce services never have)
-    critical_signature = (
-        (has_ip_host and (has_at_symbol or has_double_slash or has_bad_ssl)) or
-        (has_at_symbol and has_double_slash) or
-        (has_ip_host and has_abnormal_url)
+    # Severe attack signatures:
+    # 1. Bare IP address as host with missing/untrusted SSL, double-slash redirect, or abnormal URI
+    # 2. Credential '@' spoofing combined with bare IP or double-slash redirect
+    severe_signature = (
+        (has_ip_host and (has_bad_ssl or has_double_slash or has_abnormal_url)) or
+        (has_at_symbol and (has_ip_host or has_double_slash)) or
+        (has_ip_host and has_at_symbol)
     )
-    high_danger = (danger_flags >= 4)
 
     # 2. Model Inference
     transformed = preprocessor.transform(features_df)
@@ -88,22 +88,12 @@ def predict_from_features(features_df: pd.DataFrame, threshold: float = 0.40):
     raw_phishing_prob = float(probs[0]) * 100
     raw_legit_prob = float(probs[1]) * 100
 
-    # 3. Decision Refinement:
-    # Flag as phishing if:
-    # - Model output probability >= threshold (40.0% to guard against false negatives)
-    # - Critical threat signature fired (e.g., bare IP address + @ symbol / redirect)
-    # - High danger heuristics active (>= 4 danger flags)
-    is_phishing = bool(
-        (raw_phishing_prob >= (threshold * 100)) or 
-        critical_signature or 
-        high_danger
-    )
+    # 3. Decision Logic:
+    # Flag as phishing if model probability >= threshold (40%) OR severe adversarial signature
+    is_phishing = bool((raw_phishing_prob >= (threshold * 100)) or severe_signature)
 
-    if critical_signature:
-        phishing_prob = round(max(raw_phishing_prob, 85.0 + min(danger_flags * 1.5, 14.5)), 2)
-        legit_prob = round(100.0 - phishing_prob, 2)
-    elif high_danger and raw_phishing_prob < 50.0:
-        phishing_prob = round(max(raw_phishing_prob, 65.0 + min(danger_flags * 2.0, 30.0)), 2)
+    if severe_signature:
+        phishing_prob = round(max(raw_phishing_prob, 95.0), 2)
         legit_prob = round(100.0 - phishing_prob, 2)
     else:
         phishing_prob = round(raw_phishing_prob, 2)
