@@ -47,28 +47,27 @@ class ModelTrainer:
     def train_model(self, x_train, y_train, x_test, y_test):
         try:
             models = {
-                "Logistic Regression": LogisticRegression(verbose=1),
+                "Logistic Regression": LogisticRegression(),
                 "Decision Tree": DecisionTreeClassifier(),
-                "Random Forest": RandomForestClassifier(verbose=1),
-                "Gradient Boosting": GradientBoostingClassifier(verbose=1),
+                "Random Forest": RandomForestClassifier(),
+                "Gradient Boosting": GradientBoostingClassifier(),
                 "AdaBoost": AdaBoostClassifier()    
             }
             params = {
                 "Decision Tree": {
-                    'criterion': ['gini', 'entropy', 'log_loss']
+                    'criterion': ['gini', 'entropy']
                 },
                 "Random Forest": {
-                    'n_estimators': [8, 16, 32, 64, 128, 256]
+                    'n_estimators': [32, 64]
                 },
                 "Gradient Boosting": {
-                    'learning_rate': [.1, .01, .05, .001],
-                    'subsample': [0.6, 0.7, 0.75, 0.8, 0.85, 0.9],
-                    'n_estimators': [8, 16, 32, 64, 128, 256]
+                    'learning_rate': [0.1],
+                    'n_estimators': [32, 64]
                 },
                 "Logistic Regression": {},
                 "AdaBoost": {
-                    'learning_rate': [.1, .01, .05, .001],
-                    'n_estimators': [8, 16, 32, 64, 128, 256]
+                    'learning_rate': [0.1],
+                    'n_estimators': [32, 64]
                 }
             }
             

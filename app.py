@@ -15,10 +15,12 @@ from networkSecurity.constant.training_pipeline import DATA_INGESTION_DATABASE_N
 
 import pymongo
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, File, UploadFile, Request, Form
+from fastapi import FastAPI, File, UploadFile, Request, Form, BackgroundTasks
 from fastapi.responses import Response, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+import threading
+from datetime import datetime
 
 app = FastAPI(title="Network Security - Phishing Detection API")
 origins = ["*"]
@@ -121,26 +123,84 @@ async def predict_route(request: Request, file: UploadFile = File(...)):
     except Exception as e:
         raise NetworkSecurityException(e, sys)
 
-@app.get("/train")
-async def train_route():
+# Background Training Job State Tracker
+training_status = {
+    "is_training": False,
+    "last_status": "idle",
+    "message": "No training job currently running. Call /train to trigger retraining.",
+    "started_at": None,
+    "completed_at": None,
+    "metrics": None,
+    "error": None
+}
+training_lock = threading.Lock()
+
+def run_training_job():
+    global training_status
+    with training_lock:
+        training_status["is_training"] = True
+        training_status["last_status"] = "running"
+        training_status["started_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        training_status["message"] = "Training pipeline execution in progress..."
+        training_status["error"] = None
+
     try:
+        logging.info("Starting background training pipeline execution...")
         train_pipeline = TrainingPipeline()
         model_trainer_artifact = train_pipeline.run_pipeline()
-        return JSONResponse(content={
-            "status": "success",
-            "message": "Model training completed successfully!",
-            "train_metrics": {
-                "f1_score": round(float(model_trainer_artifact.train_metric_artifact.f1_score), 4),
-                "precision": round(float(model_trainer_artifact.train_metric_artifact.precision_score), 4),
-                "recall": round(float(model_trainer_artifact.train_metric_artifact.recall_score), 4)
-            },
-            "test_metrics": {
-                "f1_score": round(float(model_trainer_artifact.test_metric_artifact.f1_score), 4),
-                "precision": round(float(model_trainer_artifact.test_metric_artifact.precision_score), 4),
-                "recall": round(float(model_trainer_artifact.test_metric_artifact.recall_score), 4)
+
+        with training_lock:
+            training_status["is_training"] = False
+            training_status["last_status"] = "success"
+            training_status["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            training_status["message"] = "Model training completed successfully! New models and preprocessors are active."
+            training_status["metrics"] = {
+                "train_metrics": {
+                    "f1_score": round(float(model_trainer_artifact.train_metric_artifact.f1_score), 4),
+                    "precision": round(float(model_trainer_artifact.train_metric_artifact.precision_score), 4),
+                    "recall": round(float(model_trainer_artifact.train_metric_artifact.recall_score), 4)
+                },
+                "test_metrics": {
+                    "f1_score": round(float(model_trainer_artifact.test_metric_artifact.f1_score), 4),
+                    "precision": round(float(model_trainer_artifact.test_metric_artifact.precision_score), 4),
+                    "recall": round(float(model_trainer_artifact.test_metric_artifact.recall_score), 4)
+                }
             }
-        })
+        logging.info("Background training pipeline completed successfully.")
     except Exception as e:
         error_msg = str(e)
-        logging.error(f"Training failed: {error_msg}")
-        return JSONResponse(status_code=500, content={"status": "error", "message": error_msg})
+        logging.error(f"Background training pipeline failed: {error_msg}")
+        with training_lock:
+            training_status["is_training"] = False
+            training_status["last_status"] = "failed"
+            training_status["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            training_status["message"] = f"Training failed: {error_msg}"
+            training_status["error"] = error_msg
+
+@app.get("/train")
+async def train_route(background_tasks: BackgroundTasks):
+    global training_status
+    if training_status["is_training"]:
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "already_running",
+                "message": "Training pipeline is already running in background. Check /train-status for progress.",
+                "started_at": training_status["started_at"],
+                "status_endpoint": "/train-status"
+            }
+        )
+
+    background_tasks.add_task(run_training_job)
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "started",
+            "message": "Model training pipeline triggered in background! It will train and update artifacts without timing out.",
+            "status_endpoint": "/train-status"
+        }
+    )
+
+@app.get("/train-status")
+async def train_status_route():
+    return JSONResponse(content=training_status)
