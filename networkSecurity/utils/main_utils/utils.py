@@ -45,8 +45,10 @@ def save_object(file_path: str, obj: object)->None:
     try:
         logging.info("Entered the save_object method of utils")
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, "wb") as file_obj:
+        temp_file_path = f"{file_path}.tmp"
+        with open(temp_file_path, "wb") as file_obj:
             pickle.dump(obj, file_obj)
+        os.replace(temp_file_path, file_path)
         logging.info("Exited the save_object method of Mainutils class")
     except Exception as e:
         raise NetworkSecurityException(e, sys) from e

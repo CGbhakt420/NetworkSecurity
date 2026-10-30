@@ -65,11 +65,18 @@
         <div class="row justify-content-center">
             <div class="col-lg-10">
 
+                {% if error %}
+                <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+                    <strong>⚠️ Notice:</strong> {{ error }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+                {% endif %}
+
                 <!-- Detection Form Card -->
                 <div class="card card-custom p-4">
                     <h4 class="fw-bold mb-3">🔍 Analyze Website URL</h4>
                     <p class="text-muted small">
-                        Enter any website URL to extract 30 network, SSL, and domain heuristic features and evaluate it against the trained Random Forest model.
+                        Enter any website URL to extract 30 network, SSL, and domain heuristic features and evaluate it against the trained ML security pipeline.
                     </p>
 
                     <form action="/detect" method="POST">

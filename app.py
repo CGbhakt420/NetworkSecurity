@@ -35,25 +35,81 @@ app.add_middleware(
 
 templates = Jinja2Templates(directory="./templates")
 
-def predict_from_features(features_df: pd.DataFrame):
-    preprocessor = load_object("final_models/preprocessor.pkl")
-    final_model = load_object("final_models/model.pkl")
-    network_model = NetworkModel(preprocessor=preprocessor, model=final_model)
+_model_cache = {
+    "preprocessor": None,
+    "model": None,
+    "network_model": None
+}
+_cache_lock = threading.Lock()
 
-    pred = network_model.predict(features_df)[0]
-    # pred: 0.0 -> Phishing, 1.0 -> Legitimate
-    is_phishing = bool(pred == 0.0)
+def get_loaded_models():
+    global _model_cache
+    with _cache_lock:
+        if _model_cache["network_model"] is None:
+            preprocessor = load_object("final_models/preprocessor.pkl")
+            final_model = load_object("final_models/model.pkl")
+            network_model = NetworkModel(preprocessor=preprocessor, model=final_model)
+            _model_cache["preprocessor"] = preprocessor
+            _model_cache["model"] = final_model
+            _model_cache["network_model"] = network_model
+        return _model_cache["preprocessor"], _model_cache["model"], _model_cache["network_model"]
 
-    phishing_prob = None
-    legit_prob = None
-    confidence_label = "Classified"
-    if hasattr(final_model, "predict_proba"):
-        transformed = preprocessor.transform(features_df)
-        probs = final_model.predict_proba(transformed)[0]
-        phishing_prob = round(float(probs[0]) * 100, 2)
-        legit_prob = round(float(probs[1]) * 100, 2)
-        confidence_label = f"{phishing_prob}% Phishing Risk" if is_phishing else f"{legit_prob}% Legitimate Confidence"
+def invalidate_model_cache():
+    global _model_cache
+    with _cache_lock:
+        _model_cache["preprocessor"] = None
+        _model_cache["model"] = None
+        _model_cache["network_model"] = None
 
+def predict_from_features(features_df: pd.DataFrame, threshold: float = 0.40):
+    preprocessor, final_model, network_model = get_loaded_models()
+
+    # 1. Feature Inspection & Danger Signals
+    features_dict = features_df.iloc[0].to_dict()
+    danger_flags = sum(1 for v in features_dict.values() if v == -1)
+
+    has_ip_host = features_dict.get("having_IP_Address") == -1
+    has_at_symbol = features_dict.get("having_At_Symbol") == -1
+    has_double_slash = features_dict.get("double_slash_redirecting") == -1
+    has_abnormal_url = features_dict.get("Abnormal_URL") == -1
+    has_bad_ssl = features_dict.get("SSLfinal_State") == -1
+
+    # Critical threat signatures (signatures legitimate banking/ecommerce services never have)
+    critical_signature = (
+        (has_ip_host and (has_at_symbol or has_double_slash or has_bad_ssl)) or
+        (has_at_symbol and has_double_slash) or
+        (has_ip_host and has_abnormal_url)
+    )
+    high_danger = (danger_flags >= 4)
+
+    # 2. Model Inference
+    transformed = preprocessor.transform(features_df)
+    probs = final_model.predict_proba(transformed)[0]
+    raw_phishing_prob = float(probs[0]) * 100
+    raw_legit_prob = float(probs[1]) * 100
+
+    # 3. Decision Refinement:
+    # Flag as phishing if:
+    # - Model output probability >= threshold (40.0% to guard against false negatives)
+    # - Critical threat signature fired (e.g., bare IP address + @ symbol / redirect)
+    # - High danger heuristics active (>= 4 danger flags)
+    is_phishing = bool(
+        (raw_phishing_prob >= (threshold * 100)) or 
+        critical_signature or 
+        high_danger
+    )
+
+    if critical_signature:
+        phishing_prob = round(max(raw_phishing_prob, 85.0 + min(danger_flags * 1.5, 14.5)), 2)
+        legit_prob = round(100.0 - phishing_prob, 2)
+    elif high_danger and raw_phishing_prob < 50.0:
+        phishing_prob = round(max(raw_phishing_prob, 65.0 + min(danger_flags * 2.0, 30.0)), 2)
+        legit_prob = round(100.0 - phishing_prob, 2)
+    else:
+        phishing_prob = round(raw_phishing_prob, 2)
+        legit_prob = round(raw_legit_prob, 2)
+
+    confidence_label = f"{phishing_prob}% Phishing Risk" if is_phishing else f"{legit_prob}% Legitimate Confidence"
     return is_phishing, phishing_prob, legit_prob, confidence_label
 
 class URLRequest(BaseModel):
@@ -61,65 +117,72 @@ class URLRequest(BaseModel):
 
 @app.get("/")
 async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "result": None, "url": ""})
+    return templates.TemplateResponse(request=request, name="index.html", context={"request": request, "result": None, "url": "", "error": None})
 
 @app.post("/detect")
 async def detect_website(request: Request, url: str = Form(...)):
+    url_clean = (url or "").strip()
     try:
+        if not url_clean:
+            return templates.TemplateResponse(request=request, name="index.html", context={"request": request, "result": None, "url": "", "error": "Please provide a valid URL."})
+        
         extractor = URLFeatureExtractor(timeout=1.5)
-        features_df = extractor.extract_features(url)
+        features_df = extractor.extract_features(url_clean)
         is_phishing, phishing_prob, legit_prob, confidence_label = predict_from_features(features_df)
         explanations = URLFeatureExtractor.get_feature_explanations(features_df)
 
         result = {
-            "url": url,
+            "url": url_clean,
             "is_phishing": is_phishing,
-            "phishing_prob": phishing_prob if phishing_prob is not None else (100.0 if is_phishing else 0.0),
-            "legit_prob": legit_prob if legit_prob is not None else (0.0 if is_phishing else 100.0),
+            "phishing_prob": phishing_prob,
+            "legit_prob": legit_prob,
             "confidence_label": confidence_label,
             "explanations": explanations
         }
-        return templates.TemplateResponse("index.html", {"request": request, "result": result, "url": url})
+        return templates.TemplateResponse(request=request, name="index.html", context={"request": request, "result": result, "url": url_clean, "error": None})
     except Exception as e:
-        raise NetworkSecurityException(e, sys)
+        error_msg = str(e)
+        logging.error(f"Error in /detect for '{url_clean}': {error_msg}")
+        return templates.TemplateResponse(request=request, name="index.html", context={"request": request, "result": None, "url": url_clean, "error": f"Failed to analyze URL: {error_msg}"})
 
 @app.post("/predict-url")
 async def predict_url_api(payload: URLRequest):
     try:
+        url_clean = (payload.url or "").strip()
         extractor = URLFeatureExtractor(timeout=1.5)
-        features_df = extractor.extract_features(payload.url)
+        features_df = extractor.extract_features(url_clean)
         is_phishing, phishing_prob, legit_prob, confidence_label = predict_from_features(features_df)
         explanations = URLFeatureExtractor.get_feature_explanations(features_df)
 
         return JSONResponse(content={
-            "url": payload.url,
+            "url": url_clean,
             "status": "Malicious / Phishing" if is_phishing else "Legitimate / Safe",
             "is_phishing": is_phishing,
             "probabilities": {
-                "phishing": f"{phishing_prob}%" if phishing_prob is not None else "N/A",
-                "legitimate": f"{legit_prob}%" if legit_prob is not None else "N/A"
+                "phishing": f"{phishing_prob}%",
+                "legitimate": f"{legit_prob}%"
             },
             "confidence_label": confidence_label,
             "features": {k: (None if pd.isna(v) else int(v)) for k, v in features_df.iloc[0].to_dict().items()},
             "explanations": explanations
         })
     except Exception as e:
-        raise NetworkSecurityException(e, sys)
+        error_msg = str(e)
+        logging.error(f"Error in /predict-url for '{payload.url}': {error_msg}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": error_msg})
 
 @app.post("/predict")
 async def predict_route(request: Request, file: UploadFile = File(...)):
     try:
         df = pd.read_csv(file.file)
-        preprocessor = load_object("final_models/preprocessor.pkl")
-        final_model = load_object("final_models/model.pkl")
-        network_model = NetworkModel(preprocessor=preprocessor, model=final_model)
+        preprocessor, final_model, network_model = get_loaded_models()
 
         y_pred = network_model.predict(df)
         df['Predicted_column'] = y_pred
         os.makedirs("prediction_output", exist_ok=True)
         df.to_csv("prediction_output/output.csv")
         table_html = df.to_html(classes="table table-striped")
-        return templates.TemplateResponse("table.html", {"request": request, "table": table_html})
+        return templates.TemplateResponse(request=request, name="table.html", context={"request": request, "table": table_html})
     except Exception as e:
         raise NetworkSecurityException(e, sys)
 
@@ -149,6 +212,7 @@ def run_training_job():
         train_pipeline = TrainingPipeline()
         model_trainer_artifact = train_pipeline.run_pipeline()
 
+        invalidate_model_cache()
         with training_lock:
             training_status["is_training"] = False
             training_status["last_status"] = "success"
@@ -171,6 +235,7 @@ def run_training_job():
     except Exception as e:
         error_msg = str(e)
         logging.error(f"Background training pipeline failed: {error_msg}")
+        invalidate_model_cache()
         with training_lock:
             training_status["is_training"] = False
             training_status["last_status"] = "failed"

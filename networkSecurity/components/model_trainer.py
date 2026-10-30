@@ -55,36 +55,24 @@ class ModelTrainer:
             }
             params = {
                 "Decision Tree": {
-                    'criterion': ['gini', 'entropy', 'log_loss'],
-                    'max_depth': [None, 10, 20, 30],
-                    'min_samples_split': [2, 5, 10],
-                    'min_samples_leaf': [1, 2, 4],
-                    'max_features': [None, 'sqrt', 'log2']
+                    'criterion': ['gini', 'entropy'],
+                    'max_depth': [10, 20, None]
                 },
                 "Random Forest": {
-                    'n_estimators': [32, 64, 100],
-                    'criterion': ['gini', 'entropy'],
-                    'max_depth': [None, 15, 25],
-                    'min_samples_split': [2, 5],
-                    'min_samples_leaf': [1, 2],
-                    'max_features': ['sqrt', 'log2']
+                    'n_estimators': [50, 100],
+                    'max_depth': [10, 20, None]
                 },
                 "Gradient Boosting": {
-                    'learning_rate': [0.01, 0.05, 0.1, 0.2],
-                    'n_estimators': [32, 64, 100],
-                    'subsample': [0.7, 0.85, 1.0],
-                    'max_depth': [3, 5, 7],
-                    'min_samples_split': [2, 5]
+                    'learning_rate': [0.05, 0.1],
+                    'n_estimators': [50, 100],
+                    'max_depth': [3, 5]
                 },
                 "AdaBoost": {
-                    'learning_rate': [0.01, 0.05, 0.1, 0.2, 0.5, 1.0],
-                    'n_estimators': [32, 64, 100]
+                    'learning_rate': [0.05, 0.1, 0.2],
+                    'n_estimators': [50, 100]
                 },
                 "Logistic Regression": {
-                    'C': [0.01, 0.1, 1.0, 10.0, 100.0],
-                    'penalty': ['l1', 'l2'],
-                    'solver': ['liblinear'],
-                    'max_iter': [300]
+                    'C': [0.1, 1.0, 10.0]
                 }
             }
             
